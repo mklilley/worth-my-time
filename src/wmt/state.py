@@ -155,9 +155,34 @@ class JsonStateStore(StateStore):
 
     def _save(self) -> None:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        text = json.dumps(self._data, indent=2, sort_keys=True)
+        text = json.dumps(self._compact_state_for_disk(), indent=2, sort_keys=True)
         tmp.write_text(text + "\n", encoding="utf-8")
         tmp.replace(self._path)
+
+    def _compact_state_for_disk(self) -> dict[str, Any]:
+        """
+        Makes the on-disk JSON less noisy by omitting null keys.
+        """
+        out: dict[str, Any] = {"version": int(self._data.get("version", 1))}
+
+        records_out: dict[str, Any] = {}
+        for sha, rec in self._records().items():
+            if not isinstance(rec, dict):
+                continue
+            compact = {k: v for k, v in rec.items() if v is not None}
+            records_out[sha] = compact
+        out["records"] = records_out
+
+        source_out: dict[str, Any] = {}
+        for path, snap in self._source_snapshots().items():
+            if not isinstance(snap, dict):
+                continue
+            compact = {k: v for k, v in snap.items() if v is not None}
+            if compact:
+                source_out[path] = compact
+        if source_out:
+            out["source_snapshots"] = source_out
+        return out
 
     def _records(self) -> dict[str, dict[str, Any]]:
         return self._data.setdefault("records", {})
@@ -228,17 +253,20 @@ class JsonStateStore(StateStore):
         rec = records.get(sha256, {})
         if not isinstance(rec, dict):
             rec = {}
-        rec.update(
-            {
-                "status": "in_progress",
-                "started_at": time.time(),
-                "processed_at": None,
-                "source_path": str(source_path),
-                "source_mtime_ns": source_mtime_ns,
-                "source_size": source_size,
-                "error": None,
-            }
-        )
+        rec["status"] = "in_progress"
+        rec["started_at"] = time.time()
+        rec["source_path"] = str(source_path)
+        rec.pop("processed_at", None)
+        rec.pop("error", None)
+
+        if source_mtime_ns is not None:
+            rec["source_mtime_ns"] = int(source_mtime_ns)
+        else:
+            rec.pop("source_mtime_ns", None)
+        if source_size is not None:
+            rec["source_size"] = int(source_size)
+        else:
+            rec.pop("source_size", None)
         records[sha256] = rec
         self._save()
 
@@ -257,20 +285,32 @@ class JsonStateStore(StateStore):
         rec = records.get(sha256, {})
         if not isinstance(rec, dict):
             rec = {}
-        rec.update(
-            {
-                "status": "processed",
-                "started_at": None,
-                "processed_at": time.time(),
-                "source_path": str(source_path) if source_path else rec.get("source_path"),
-                "source_mtime_ns": source_mtime_ns if source_mtime_ns is not None else rec.get("source_mtime_ns"),
-                "source_size": source_size if source_size is not None else rec.get("source_size"),
-                "archive_path": str(archive_path) if archive_path else None,
-                "topic_file": str(topic_file) if topic_file else None,
-                "codex_status": codex_status,
-                "error": None,
-            }
-        )
+        rec["status"] = "processed"
+        rec["processed_at"] = time.time()
+        rec.pop("started_at", None)
+        rec.pop("error", None)
+
+        if source_path:
+            rec["source_path"] = str(source_path)
+        if source_mtime_ns is not None:
+            rec["source_mtime_ns"] = int(source_mtime_ns)
+        if source_size is not None:
+            rec["source_size"] = int(source_size)
+
+        if archive_path:
+            rec["archive_path"] = str(archive_path)
+        else:
+            rec.pop("archive_path", None)
+
+        if topic_file:
+            rec["topic_file"] = str(topic_file)
+        else:
+            rec.pop("topic_file", None)
+
+        if codex_status is not None:
+            rec["codex_status"] = codex_status
+        else:
+            rec.pop("codex_status", None)
         records[sha256] = rec
 
         if source_path and source_mtime_ns is not None and source_size is not None:
@@ -285,14 +325,10 @@ class JsonStateStore(StateStore):
         rec = records.get(sha256, {})
         if not isinstance(rec, dict):
             rec = {}
-        rec.update(
-            {
-                "status": "failed",
-                "started_at": None,
-                "processed_at": time.time(),
-                "error": error,
-            }
-        )
+        rec["status"] = "failed"
+        rec["processed_at"] = time.time()
+        rec["error"] = error
+        rec.pop("started_at", None)
         records[sha256] = rec
         self._save()
 

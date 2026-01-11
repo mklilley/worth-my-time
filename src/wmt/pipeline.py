@@ -1,0 +1,360 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+from wmt.bookmarks import BookmarkItem, BookmarksError, load_brave_inbox_bookmarks
+from wmt.codex_runner import CodexError, run_codex
+from wmt.config import AppConfig
+from wmt.fetch import extract_text_from_html, fetch_url, summarize_fetch_for_prompt
+from wmt.state import StateStore
+from wmt.triage_output import atomic_write_text, triage_output_filename
+from wmt.triage_prompt import build_triage_prompt
+from wmt.urls import is_probably_http_url, normalize_url
+from wmt.youtube_transcripts import get_youtube_transcript, is_youtube_url
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ProcessOutcome:
+    item_id: str
+    url: str
+    output_file: Path
+    codex_status: str
+
+
+def _local_dt(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone()
+
+
+def _truncate(text: str, *, max_chars: int) -> tuple[str, bool]:
+    if max_chars <= 0:
+        return text, False
+    if len(text) <= max_chars:
+        return text, False
+    return text[:max_chars].rstrip() + "\n\n[TRUNCATED]\n", True
+
+
+def _build_transcript_payload(
+    cfg: AppConfig,
+    *,
+    url: str,
+    title_hint: str | None,
+) -> tuple[str, str | None]:
+    """
+    Returns (transcript_payload, extracted_title).
+
+    The transcript payload is intentionally *not* only a spoken transcript. It always includes
+    a factual "access report" so the LLM doesn't bluff about what was/wasn't accessible.
+    """
+    normalized = normalize_url(url)
+
+    if is_youtube_url(normalized):
+        yt = get_youtube_transcript(normalized)
+        if yt and yt.text.strip():
+            log.info(
+                "Retrieved YouTube transcript via %s (chars=%s)",
+                yt.source,
+                len(yt.text),
+            )
+            header = [
+                "TRANSCRIPT SOURCE: YouTube captions",
+                f"- Retrieved via: {yt.source}",
+            ]
+            if yt.language:
+                header.append(f"- Language: {yt.language}")
+            if yt.is_auto is not None:
+                header.append(f"- Auto-generated: {yt.is_auto}")
+            if yt.notes:
+                header.append("- Notes:")
+                header.extend([f"  - {n}" for n in yt.notes])
+            payload = "\n".join(header).strip() + "\n\n" + yt.text.strip()
+            payload, _trunc = _truncate(payload, max_chars=cfg.fetch.max_transcript_chars)
+            return payload, title_hint
+        log.info("No YouTube transcript available; falling back to HTTP fetch: %s", normalized)
+
+    fetch = fetch_url(
+        normalized,
+        timeout_seconds=cfg.fetch.timeout_seconds,
+        max_bytes=cfg.fetch.max_bytes,
+    )
+    log.info(
+        "Fetched URL: status=%s ok=%s bytes=%s%s content_type=%s",
+        fetch.status,
+        fetch.ok,
+        fetch.bytes_read,
+        " (truncated)" if fetch.truncated else "",
+        fetch.content_type or "",
+    )
+    report = summarize_fetch_for_prompt(fetch)
+
+    extracted_title: str | None = None
+    extracted_text: str = ""
+
+    if fetch.text and (fetch.content_type or "").lower().startswith("text/html"):
+        page = extract_text_from_html(fetch.text)
+        extracted_title = page.title or None
+        extracted_text = page.text or ""
+
+    parts = [report]
+    if extracted_title:
+        parts.append("")
+        parts.append(f"EXTRACTED TITLE: {extracted_title}")
+    if extracted_text:
+        parts.append("")
+        parts.append("EXTRACTED TEXT (best-effort; may include boilerplate/nav):")
+        parts.append(extracted_text)
+
+    payload = "\n".join(parts).strip()
+    payload, _trunc = _truncate(payload, max_chars=cfg.fetch.max_transcript_chars)
+    return payload, extracted_title
+
+
+def _should_skip_due_to_state(state: StateStore, item_id: str, *, force: bool) -> bool:
+    if force:
+        return False
+    rec = state.get(item_id)
+    if rec is None:
+        return False
+    return rec.status in {"processed", "failed"}
+
+
+def process_bookmark_item(
+    cfg: AppConfig,
+    *,
+    bookmark: BookmarkItem,
+    state: StateStore,
+    force: bool = False,
+) -> ProcessOutcome | None:
+    normalized_url = normalize_url(bookmark.url)
+    if not is_probably_http_url(normalized_url):
+        log.info("Skipping non-http URL: %s", bookmark.url)
+        return None
+
+    item_id = bookmark.identity_sha256(normalized_url=normalized_url)
+
+    if _should_skip_due_to_state(state, item_id, force=force):
+        log.info("Already processed (bookmark id): %s", normalized_url)
+        return None
+
+    if not state.allow_retry_in_progress(item_id, cfg.processing.in_progress_ttl_seconds) and not force:
+        log.info("In-progress elsewhere (skipping for now): %s", normalized_url)
+        return None
+
+    title_for_log = (bookmark.title or "").strip() or "(no title)"
+    log.info("Processing bookmark: %s — %s", title_for_log, normalized_url)
+
+    state.mark_in_progress(
+        item_id,
+        cfg.paths.bookmarks_file,
+        source_mtime_ns=None,
+        source_size=None,
+        force=True,
+    )
+
+    added_at = _local_dt(bookmark.date_added)
+    transcript_payload, extracted_title = _build_transcript_payload(
+        cfg,
+        url=normalized_url,
+        title_hint=bookmark.title,
+    )
+    title_for_filename = bookmark.title or extracted_title or "Untitled"
+    filename = triage_output_filename(title=title_for_filename, added_at=added_at, short_id=item_id)
+    output_file = (cfg.paths.output_dir / filename).expanduser()
+    log.info("Writing analysis to: %s", output_file)
+
+    stdin_prompt = build_triage_prompt(
+        link=normalized_url,
+        transcript=transcript_payload,
+        output_file=str(output_file),
+    )
+
+    try:
+        if not cfg.codex.enabled:
+            raise CodexError("Codex is disabled in config")
+        result = run_codex(cfg.codex, stdin_prompt=stdin_prompt)
+        markdown = result.markdown.strip()
+        codex_status = "ok"
+    except CodexError as e:
+        codex_status = "unavailable"
+        markdown = (
+            f"# {title_for_filename}\n"
+            f"Source: {normalized_url}\n"
+            f"Input basis: Transcript provided (access report + best-effort extract)\n\n"
+            f"## So… is it worth it?\n"
+            f"**Recommendation:** Maybe\n"
+            f"**Why (2–4 bullets):**\n"
+            f"- Codex was unavailable, so this file contains only the access report/extract.\n"
+            f"- Error: {e}\n\n"
+            f"<details>\n"
+            f"<summary>Deeper: access report & extracted text</summary>\n\n"
+            f"```\n{transcript_payload}\n```\n"
+            f"</details>\n"
+        )
+
+    atomic_write_text(output_file, markdown)
+    state.mark_processed(
+        item_id,
+        archive_path=None,
+        topic_file=output_file,
+        codex_status=codex_status,
+        source_path=cfg.paths.bookmarks_file,
+        source_mtime_ns=None,
+        source_size=None,
+    )
+    return ProcessOutcome(
+        item_id=item_id,
+        url=normalized_url,
+        output_file=output_file,
+        codex_status=codex_status,
+    )
+
+
+def process_one_from_inbox(
+    cfg: AppConfig,
+    *,
+    state: StateStore,
+    force: bool = False,
+) -> ProcessOutcome | None:
+    try:
+        bookmarks = load_brave_inbox_bookmarks(
+            bookmarks_path=cfg.paths.bookmarks_file,
+            inbox_folder_name=cfg.bookmarks.inbox_folder_name,
+            root_name=cfg.bookmarks.root_name,
+        )
+    except BookmarksError as e:
+        log.warning("Failed to read bookmarks: %s", e)
+        return None
+
+    def sort_key(b: BookmarkItem) -> tuple[int, str]:
+        dt = b.date_added or datetime(1970, 1, 1, tzinfo=timezone.utc)
+        return (int(dt.timestamp()), b.url)
+
+    bookmarks.sort(key=sort_key)
+    if not bookmarks:
+        log.info("Inbox folder has no URL bookmarks: %s", cfg.bookmarks.inbox_folder_name)
+        return None
+
+    processed = 0
+    for b in bookmarks:
+        if processed >= max(1, cfg.processing.max_items_per_run):
+            break
+        try:
+            outcome = process_bookmark_item(cfg, bookmark=b, state=state, force=force)
+            if outcome:
+                processed += 1
+                return outcome
+        except Exception:
+            log.exception("Failed processing bookmark: %s", b.url)
+            try:
+                normalized = normalize_url(b.url)
+                item_id = b.identity_sha256(normalized_url=normalized)
+                state.mark_failed(item_id, "Unhandled exception (see logs)")
+            except Exception:
+                pass
+
+    log.info("No unprocessed bookmarks found in Inbox (nothing to do).")
+    return None
+
+
+def process_url(
+    cfg: AppConfig,
+    *,
+    url: str,
+    state: StateStore,
+    transcript: str | None = None,
+    title: str | None = None,
+    force: bool = False,
+) -> ProcessOutcome | None:
+    normalized_url = normalize_url(url)
+    if not is_probably_http_url(normalized_url):
+        log.warning("Not an http(s) URL: %s", url)
+        return None
+
+    # Manual mode is idempotent per normalized URL by default.
+    manual_item = BookmarkItem(
+        url=normalized_url,
+        title=title,
+        guid=None,
+        id=None,
+        date_added_raw=None,
+        date_added=None,
+    )
+    item_id = manual_item.identity_sha256(normalized_url=normalized_url)
+
+    if _should_skip_due_to_state(state, item_id, force=force):
+        log.info("Already processed (url): %s", normalized_url)
+        return None
+
+    if not state.allow_retry_in_progress(item_id, cfg.processing.in_progress_ttl_seconds) and not force:
+        log.info("In-progress elsewhere (skipping for now): %s", normalized_url)
+        return None
+
+    state.mark_in_progress(
+        item_id,
+        cfg.paths.bookmarks_file,
+        source_mtime_ns=None,
+        source_size=None,
+        force=True,
+    )
+
+    if transcript is not None and transcript.strip():
+        payload = "TRANSCRIPT PROVIDED BY USER:\n\n" + transcript.strip()
+        payload, _trunc = _truncate(payload, max_chars=cfg.fetch.max_transcript_chars)
+        extracted_title = title
+    else:
+        payload, extracted_title = _build_transcript_payload(cfg, url=normalized_url, title_hint=title)
+
+    title_for_filename = title or extracted_title or "Untitled"
+    filename = triage_output_filename(title=title_for_filename, added_at=datetime.now(), short_id=item_id)
+    output_file = (cfg.paths.output_dir / filename).expanduser()
+    log.info("Processing URL: %s", normalized_url)
+    log.info("Writing analysis to: %s", output_file)
+
+    stdin_prompt = build_triage_prompt(
+        link=normalized_url,
+        transcript=payload,
+        output_file=str(output_file),
+    )
+
+    try:
+        if not cfg.codex.enabled:
+            raise CodexError("Codex is disabled in config")
+        result = run_codex(cfg.codex, stdin_prompt=stdin_prompt)
+        markdown = result.markdown.strip()
+        codex_status = "ok"
+    except CodexError as e:
+        codex_status = "unavailable"
+        markdown = (
+            f"# {title_for_filename}\n"
+            f"Source: {normalized_url}\n"
+            f"Input basis: Transcript provided (access report + best-effort extract)\n\n"
+            f"## So… is it worth it?\n"
+            f"**Recommendation:** Maybe\n"
+            f"**Why (2–4 bullets):**\n"
+            f"- Codex was unavailable, so this file contains only the access report/extract.\n"
+            f"- Error: {e}\n\n"
+            f"<details>\n"
+            f"<summary>Deeper: access report & extracted text</summary>\n\n"
+            f"```\n{payload}\n```\n"
+            f"</details>\n"
+        )
+
+    atomic_write_text(output_file, markdown)
+    state.mark_processed(
+        item_id,
+        archive_path=None,
+        topic_file=output_file,
+        codex_status=codex_status,
+        source_path=cfg.paths.bookmarks_file,
+        source_mtime_ns=None,
+        source_size=None,
+    )
+    return ProcessOutcome(item_id=item_id, url=normalized_url, output_file=output_file, codex_status=codex_status)

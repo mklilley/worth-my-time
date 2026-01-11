@@ -1,0 +1,60 @@
+# worth-my-time (wmt) config (YAML)
+
+paths:
+  # Brave/Chromium bookmarks JSON file.
+  #
+  # macOS default profile is usually stored under `Default/`, even if your visible profile name is different.
+  # For Brave on macOS (default profile):
+  #   ~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Bookmarks
+  bookmarks_file: ~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Bookmarks
+
+  # One Markdown file per processed bookmark (point this at a Syncthing-synced folder).
+  output_dir: ~/Syncthing/WorthMyTime
+
+  # Logs
+  log_file: ~/Library/Logs/worth_my_time.log
+
+bookmarks:
+  # Brave stores bookmarks under roots.bookmark_bar / roots.other / roots.synced, etc.
+  root_name: bookmark_bar
+
+  # Folder name to watch inside the chosen root.
+  inbox_folder_name: Inbox
+
+state:
+  # Where wmt records what has already been processed (so it won’t re-run the same bookmark).
+  # Options: json | sqlite
+  backend: json
+  path: ~/.config/wmt/state.json
+
+processing:
+  # Brave may update the Bookmarks file in-place; this avoids parsing it mid-write.
+  stable_seconds: 2
+  poll_interval_seconds: 30
+
+  # Avoid double-processing across multiple runners.
+  in_progress_ttl_seconds: 3600
+
+  # Keep v1 simple: only process one item per run/loop.
+  max_items_per_run: 1
+
+fetch:
+  # HTTP fetch settings for best-effort extraction.
+  timeout_seconds: 20
+  max_bytes: 2000000
+
+  # Safety cap to keep prompts reasonably sized.
+  max_transcript_chars: 120000
+
+codex:
+  enabled: true
+  # Command used to generate analysis. `-` means "read prompt from stdin".
+  # Example: ["codex", "--color", "never", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "-"]
+  command: ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "-"]
+  model: ""
+  # Optional: pass through to Codex as `-c model_reasoning_effort="..."` (e.g. low|medium|high|xhigh).
+  model_reasoning_effort: ""
+  # Enable Codex web search so it can find “reception pulse” links.
+  web_search_enabled: true
+  timeout_seconds: 900
+

@@ -16,11 +16,10 @@ class Watcher:
     def __init__(self, cfg: AppConfig) -> None:
         self._cfg = cfg
         self._stop = False
-        self._state: StateStore = open_state_store(path=cfg.state.path, backend=cfg.state.backend)
         self._stable = StableFileTracker(stable_seconds=cfg.processing.stable_seconds)
 
     def close(self) -> None:
-        self._state.close()
+        return
 
     def stop(self) -> None:
         self._stop = True
@@ -67,6 +66,16 @@ class Watcher:
                 )
             return
 
-        outcome = process_one_from_inbox(self._cfg, state=self._state)
-        if outcome:
-            log.info("Processed bookmark -> %s (codex=%s)", outcome.output_file, outcome.codex_status)
+        # Reload the state store each run so manual edits to state.json take effect, and so
+        # concurrent one-off runs (`wmt process-one`) don't require restarting the watcher.
+        state: StateStore = open_state_store(path=self._cfg.state.path, backend=self._cfg.state.backend)
+        try:
+            outcome = process_one_from_inbox(self._cfg, state=state)
+            if outcome:
+                log.info(
+                    "Processed bookmark -> %s (codex=%s)",
+                    outcome.output_file,
+                    outcome.codex_status,
+                )
+        finally:
+            state.close()

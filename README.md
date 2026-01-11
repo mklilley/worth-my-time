@@ -113,6 +113,7 @@ scripts/uninstall_launchd.sh
 - **Paywalls:** the output should clearly say what was/wasn’t accessible.
 - **Crash safety:** items are marked `in_progress` first (with TTL) and won’t double-process across runners.
 - **One file per bookmark:** the tool writes a fresh file once per processed item (no append-only notebooks).
+- **Filenames:** `wmt` writes `<slug>.md` and adds `-2`, `-3`, … if a file already exists.
 
 ## Optional: HackMD publishing
 

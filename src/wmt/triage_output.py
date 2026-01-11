@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import tempfile
-from datetime import datetime
 from pathlib import Path
 
 
@@ -16,16 +15,30 @@ def _slugify(value: str, *, max_len: int = 80) -> str:
     return value[:max_len].strip("-") or "untitled"
 
 
-def triage_output_filename(
+def triage_output_path(
+    output_dir: Path,
     *,
     title: str | None,
-    added_at: datetime | None,
-    short_id: str,
-) -> str:
-    date_prefix = (added_at or datetime.now()).strftime("%Y-%m-%d")
-    slug = _slugify(title or "")
-    short = re.sub(r"[^a-fA-F0-9]", "", short_id)[:10].lower() or short_id[:10]
-    return f"{date_prefix}--{slug}--{short}.md"
+    slug_max_len: int = 60,
+) -> Path:
+    """
+    Returns a non-existing path under `output_dir`:
+      <slug>.md, or <slug>-2.md, <slug>-3.md, ...
+
+    Note: this is best-effort and not perfectly race-proof across concurrent writers, but
+    `wmt` is designed to run as a single writer in normal usage.
+    """
+    slug = _slugify(title or "", max_len=slug_max_len)
+    candidate = output_dir / f"{slug}.md"
+    if not candidate.exists():
+        return candidate
+
+    for i in range(2, 10_000):
+        candidate = output_dir / f"{slug}-{i}.md"
+        if not candidate.exists():
+            return candidate
+
+    raise RuntimeError(f"Could not find available filename for: {slug}.md")
 
 
 def atomic_write_text(path: Path, text: str) -> None:

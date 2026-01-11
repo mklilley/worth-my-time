@@ -10,7 +10,7 @@ from wmt.codex_runner import CodexError, run_codex
 from wmt.config import AppConfig
 from wmt.publish import publish_all
 from wmt.state import StateStore
-from wmt.triage_output import atomic_write_text, triage_output_filename
+from wmt.triage_output import atomic_write_text, triage_output_path
 from wmt.triage_prompt import build_triage_prompt
 from wmt.urls import is_probably_http_url, normalize_url
 from wmt.youtube_metadata import YouTubeMetadata, get_youtube_metadata
@@ -25,14 +25,6 @@ class ProcessOutcome:
     url: str
     output_file: Path
     codex_status: str
-
-
-def _local_dt(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt
-    return dt.astimezone()
 
 
 def _truncate(text: str, *, max_chars: int) -> tuple[str, bool]:
@@ -156,7 +148,6 @@ def process_bookmark_item(
         force=True,
     )
 
-    added_at = _local_dt(bookmark.date_added)
     transcript_payload, extracted_title, metadata_payload = _build_transcript_payload(
         cfg,
         url=normalized_url,
@@ -168,8 +159,7 @@ def process_bookmark_item(
         state.mark_failed(item_id, err)
         return None
     title_for_filename = bookmark.title or extracted_title or "Untitled"
-    filename = triage_output_filename(title=title_for_filename, added_at=added_at, short_id=item_id)
-    output_file = (cfg.paths.output_dir / filename).expanduser()
+    output_file = triage_output_path(cfg.paths.output_dir.expanduser(), title=title_for_filename)
     log.info("Writing analysis to: %s", output_file)
 
     stdin_prompt = build_triage_prompt(
@@ -339,8 +329,7 @@ def process_url(
             return None
 
     title_for_filename = title or extracted_title or "Untitled"
-    filename = triage_output_filename(title=title_for_filename, added_at=datetime.now(), short_id=item_id)
-    output_file = (cfg.paths.output_dir / filename).expanduser()
+    output_file = triage_output_path(cfg.paths.output_dir.expanduser(), title=title_for_filename)
     log.info("Processing URL: %s", normalized_url)
     log.info("Writing analysis to: %s", output_file)
 

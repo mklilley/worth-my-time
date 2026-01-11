@@ -14,6 +14,11 @@ STDERR_LOG="$HOME/Library/Logs/wmt.launchd.err.log"
 
 mkdir -p "$CONFIG_DIR" "$LAUNCH_AGENTS_DIR" "$HOME/Library/Logs"
 
+escape_sed_repl() {
+  # Escape replacement string for sed when using | as delimiter.
+  printf '%s' "$1" | sed -e 's/[&|]/\\&/g'
+}
+
 WMT_BIN=""
 if [[ -n "${VIRTUAL_ENV:-}" && -x "$VIRTUAL_ENV/bin/wmt" ]]; then
   WMT_BIN="$VIRTUAL_ENV/bin/wmt"
@@ -36,6 +41,14 @@ if [[ -z "$WMT_BIN" ]]; then
   exit 1
 fi
 
+PATH_FOR_LAUNCHD="${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+# Ensure common locations exist in PATH for launchd (it doesn't load your shell profile).
+for p in "/opt/homebrew/bin" "/usr/local/bin" "$HOME/.local/bin"; do
+  if [[ -d "$p" && ":$PATH_FOR_LAUNCHD:" != *":$p:"* ]]; then
+    PATH_FOR_LAUNCHD="$p:$PATH_FOR_LAUNCHD"
+  fi
+done
+
 if [[ ! -f "$CONFIG_PATH" ]]; then
   cp "$ROOT_DIR/config.yaml" "$CONFIG_PATH"
   echo "Copied default config to: $CONFIG_PATH"
@@ -44,11 +57,12 @@ else
 fi
 
 sed \
-  -e "s|__CONFIG_PATH__|$CONFIG_PATH|g" \
-  -e "s|__WORKDIR__|$ROOT_DIR|g" \
-  -e "s|__WMT_BIN__|$WMT_BIN|g" \
-  -e "s|__STDOUT_LOG__|$STDOUT_LOG|g" \
-  -e "s|__STDERR_LOG__|$STDERR_LOG|g" \
+  -e "s|__CONFIG_PATH__|$(escape_sed_repl "$CONFIG_PATH")|g" \
+  -e "s|__WORKDIR__|$(escape_sed_repl "$ROOT_DIR")|g" \
+  -e "s|__WMT_BIN__|$(escape_sed_repl "$WMT_BIN")|g" \
+  -e "s|__PATH__|$(escape_sed_repl "$PATH_FOR_LAUNCHD")|g" \
+  -e "s|__STDOUT_LOG__|$(escape_sed_repl "$STDOUT_LOG")|g" \
+  -e "s|__STDERR_LOG__|$(escape_sed_repl "$STDERR_LOG")|g" \
   "$TEMPLATE_PATH" > "$PLIST_PATH"
 
 echo "Wrote launchd plist: $PLIST_PATH"

@@ -61,11 +61,13 @@ WHAT TO DO
    - What (if anything) is genuinely new: result, framing, synthesis, dataset, technique, clarity, or reach?
 
 6) “How it’s being received” (quick pulse):
-   - Find 3–8 independent reactions online where possible (reputable outlets, knowledgeable blogs, researcher comments, forum threads, review papers, GitHub issues, etc.).
+   - This section is required. Use web search (if available) to find 3–8 independent reactions (reputable outlets, knowledgeable blogs, researcher comments, forum threads, review papers, GitHub issues, etc.).
    - Summarise the reception: enthusiastic / mixed / sceptical, and why.
    - Flag obvious marketing/affiliate/echo-chamber signals.
    - Include links to the reactions you used.
-   - If you can’t find meaningful reception signals, say so.
+   - Don’t pad with generic search links (e.g. DuckDuckGo query URLs) unless web search is genuinely unavailable.
+   - If you can’t find meaningful reception signals after searching, say so and list 3–5 search queries you tried.
+   - If web search is not available in this run, say so explicitly and list 3–5 queries you would have tried.
 
 MARKDOWN STRUCTURE (use this exact skeleton)
 

@@ -39,12 +39,12 @@ processing:
   max_items_per_run: 1
 
 fetch:
-  # HTTP fetch settings for best-effort extraction.
-  timeout_seconds: 20
-  max_bytes: 2000000
-
   # Safety cap to keep prompts reasonably sized.
   max_transcript_chars: 120000
+
+  # Reserved for future script-side probing/prefetch (currently unused):
+  timeout_seconds: 20
+  max_bytes: 2000000
 
 codex:
   enabled: true
@@ -57,4 +57,3 @@ codex:
   # Enable Codex web search so it can find “reception pulse” links.
   web_search_enabled: true
   timeout_seconds: 900
-

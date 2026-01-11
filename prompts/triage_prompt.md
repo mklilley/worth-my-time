@@ -12,7 +12,8 @@ If {TRANSCRIPT} is empty or missing:
 - Use {LINK} as the primary source and fetch whatever is accessible.
 
 OUTPUT
-- Write a single Markdown file to: {OUTPUT_FILE}
+- Return a single Markdown document (content only).
+- The script will save it to: {OUTPUT_FILE} (do not attempt to write files yourself).
 - UK English.
 - Keep the top section short enough to read on a phone in ~30–60 seconds.
 - Then add deeper sections (use <details> blocks) so I can stop early if I’m not interested.

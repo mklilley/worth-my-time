@@ -8,7 +8,6 @@ from pathlib import Path
 from wmt.bookmarks import BookmarkItem, BookmarksError, load_brave_inbox_bookmarks
 from wmt.codex_runner import CodexError, run_codex
 from wmt.config import AppConfig
-from wmt.fetch import extract_text_from_html, fetch_url, summarize_fetch_for_prompt
 from wmt.state import StateStore
 from wmt.triage_output import atomic_write_text, triage_output_filename
 from wmt.triage_prompt import build_triage_prompt
@@ -51,8 +50,11 @@ def _build_transcript_payload(
     """
     Returns (transcript_payload, extracted_title).
 
-    The transcript payload is intentionally *not* only a spoken transcript. It always includes
-    a factual "access report" so the LLM doesn't bluff about what was/wasn't accessible.
+    For v1 we only provide a transcript when we can reliably retrieve one (YouTube),
+    or when a user supplies it directly via `process-url --transcript-stdin`.
+
+    For normal webpages, we leave the transcript empty and rely on Codex web search/browsing
+    to read what it can from the URL.
     """
     normalized = normalize_url(url)
 
@@ -78,43 +80,9 @@ def _build_transcript_payload(
             payload = "\n".join(header).strip() + "\n\n" + yt.text.strip()
             payload, _trunc = _truncate(payload, max_chars=cfg.fetch.max_transcript_chars)
             return payload, title_hint
-        log.info("No YouTube transcript available; falling back to HTTP fetch: %s", normalized)
+        log.info("No YouTube transcript available; leaving transcript empty: %s", normalized)
 
-    fetch = fetch_url(
-        normalized,
-        timeout_seconds=cfg.fetch.timeout_seconds,
-        max_bytes=cfg.fetch.max_bytes,
-    )
-    log.info(
-        "Fetched URL: status=%s ok=%s bytes=%s%s content_type=%s",
-        fetch.status,
-        fetch.ok,
-        fetch.bytes_read,
-        " (truncated)" if fetch.truncated else "",
-        fetch.content_type or "",
-    )
-    report = summarize_fetch_for_prompt(fetch)
-
-    extracted_title: str | None = None
-    extracted_text: str = ""
-
-    if fetch.text and (fetch.content_type or "").lower().startswith("text/html"):
-        page = extract_text_from_html(fetch.text)
-        extracted_title = page.title or None
-        extracted_text = page.text or ""
-
-    parts = [report]
-    if extracted_title:
-        parts.append("")
-        parts.append(f"EXTRACTED TITLE: {extracted_title}")
-    if extracted_text:
-        parts.append("")
-        parts.append("EXTRACTED TEXT (best-effort; may include boilerplate/nav):")
-        parts.append(extracted_text)
-
-    payload = "\n".join(parts).strip()
-    payload, _trunc = _truncate(payload, max_chars=cfg.fetch.max_transcript_chars)
-    return payload, extracted_title
+    return "", title_hint
 
 
 def _should_skip_due_to_state(state: StateStore, item_id: str, *, force: bool) -> bool:
@@ -184,20 +152,24 @@ def process_bookmark_item(
         codex_status = "ok"
     except CodexError as e:
         codex_status = "unavailable"
+        basis = "Transcript provided" if transcript_payload.strip() else "Link only"
         markdown = (
             f"# {title_for_filename}\n"
             f"Source: {normalized_url}\n"
-            f"Input basis: Transcript provided (access report + best-effort extract)\n\n"
+            f"Input basis: {basis} (Codex unavailable)\n\n"
             f"## So… is it worth it?\n"
             f"**Recommendation:** Maybe\n"
             f"**Why (2–4 bullets):**\n"
-            f"- Codex was unavailable, so this file contains only the access report/extract.\n"
+            f"- Codex was unavailable, so this file contains only the link (and transcript if provided).\n"
             f"- Error: {e}\n\n"
-            f"<details>\n"
-            f"<summary>Deeper: access report & extracted text</summary>\n\n"
-            f"```\n{transcript_payload}\n```\n"
-            f"</details>\n"
         )
+        if transcript_payload.strip():
+            markdown += (
+                "\n<details>\n"
+                "<summary>Deeper: provided transcript</summary>\n\n"
+                f"```\n{transcript_payload}\n```\n"
+                "</details>\n"
+            )
 
     atomic_write_text(output_file, markdown)
     state.mark_processed(
@@ -332,20 +304,24 @@ def process_url(
         codex_status = "ok"
     except CodexError as e:
         codex_status = "unavailable"
+        basis = "Transcript provided" if payload.strip() else "Link only"
         markdown = (
             f"# {title_for_filename}\n"
             f"Source: {normalized_url}\n"
-            f"Input basis: Transcript provided (access report + best-effort extract)\n\n"
+            f"Input basis: {basis} (Codex unavailable)\n\n"
             f"## So… is it worth it?\n"
             f"**Recommendation:** Maybe\n"
             f"**Why (2–4 bullets):**\n"
-            f"- Codex was unavailable, so this file contains only the access report/extract.\n"
+            f"- Codex was unavailable, so this file contains only the link (and transcript if provided).\n"
             f"- Error: {e}\n\n"
-            f"<details>\n"
-            f"<summary>Deeper: access report & extracted text</summary>\n\n"
-            f"```\n{payload}\n```\n"
-            f"</details>\n"
         )
+        if payload.strip():
+            markdown += (
+                "\n<details>\n"
+                "<summary>Deeper: provided transcript</summary>\n\n"
+                f"```\n{payload}\n```\n"
+                "</details>\n"
+            )
 
     atomic_write_text(output_file, markdown)
     state.mark_processed(

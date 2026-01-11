@@ -7,7 +7,7 @@ Local-first “content triage” pipeline: save links into a Brave bookmarks fol
 1. Reads Brave/Chromium `Bookmarks` JSON file (macOS default profile)
 2. Finds `roots.bookmark_bar/.../Inbox`
 3. Picks **one** unprocessed URL bookmark
-4. Fetches what it can (best-effort HTML text extraction) and/or pulls **YouTube captions**
+4. Pulls **YouTube captions** when available; otherwise relies on Codex web search/browsing to read the URL
 5. Runs an LLM triage prompt via Codex CLI (optionally with web search enabled for “reception pulse” links)
 6. Writes a single `.md` file into your output folder
 7. Records processed state (JSON default; optional sqlite) so each item is handled once
@@ -89,7 +89,7 @@ wmt status
 
 ## Notes / guarantees
 
-- **No hallucinated access:** the prompt always includes a factual “access report” from this script.
+- **No-bluff prompt:** the prompt explicitly demands it says what it could/couldn’t access (paywalls, partial content, no transcript, etc.).
 - **Paywalls:** the output should clearly say what was/wasn’t accessible.
 - **Crash safety:** items are marked `in_progress` first (with TTL) and won’t double-process across runners.
 - **One file per bookmark:** the tool writes a fresh file once per processed item (no append-only notebooks).

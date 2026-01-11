@@ -15,7 +15,8 @@ If {TRANSCRIPT} is empty or missing:
 - Use {LINK} as the primary source and fetch whatever is accessible.
 
 OUTPUT
-- Write a single Markdown file to: {OUTPUT_FILE}
+- Return a single Markdown document (content only).
+- The script will save it to: {OUTPUT_FILE} (do not attempt to write files yourself).
 - UK English.
 - Keep the top section short enough to read on a phone in ~30–60 seconds.
 - Then add deeper sections (use <details> blocks) so I can stop early if I’m not interested.
@@ -127,8 +128,10 @@ FINAL TONE GUIDANCE
 
 
 def build_triage_prompt(*, link: str, transcript: str, output_file: str) -> str:
-    return (
-        TRIAGE_PROMPT_TEMPLATE.replace("{LINK}", link or "")
-        .replace("{TRANSCRIPT}", transcript or "")
-        .replace("{OUTPUT_FILE}", output_file or "")
-    )
+    # Important: only fill the *input value slots* (first occurrence), leaving later references
+    # like "If {TRANSCRIPT} is present..." intact as variable names (not duplicated transcript text).
+    prompt = TRIAGE_PROMPT_TEMPLATE
+    prompt = prompt.replace("{LINK}", link or "", 1)
+    prompt = prompt.replace("{TRANSCRIPT}", transcript or "", 1)
+    prompt = prompt.replace("{OUTPUT_FILE}", output_file or "", 1)
+    return prompt

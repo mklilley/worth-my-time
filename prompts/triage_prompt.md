@@ -65,7 +65,7 @@ WHAT TO DO
 MARKDOWN STRUCTURE (use this exact skeleton)
 
 # {Title or best-guess title}
-Source: {LINK if provided, else "N/A"}
+Source: <{LINK}> (or "N/A" if no link)
 Input basis: {Transcript provided / Link only} (and note any access limits)
 By: {Author/Org if known} • Date: {if known} • Format: {if known} • Length: {if known}
 

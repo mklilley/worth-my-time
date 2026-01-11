@@ -14,6 +14,9 @@ paths:
   # Logs
   log_file: ~/Library/Logs/worth_my_time.log
 
+  # Optional: override the built-in triage prompt template.
+  # triage_prompt_file: ~/.config/wmt/triage_prompt.md
+
 bookmarks:
   # Brave stores bookmarks under roots.bookmark_bar / roots.other / roots.synced, etc.
   root_name: bookmark_bar

@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Installing optional system dependencies for wmt."
+echo "Installing optional dependencies for wmt."
 echo
 
-if ! command -v brew >/dev/null 2>&1; then
-  echo "Homebrew not found. Install Homebrew first, then rerun this script."
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+  echo "No virtualenv detected (VIRTUAL_ENV is empty)."
+  echo
+  echo "Run:"
+  echo "  python3 -m venv .venv"
+  echo "  source .venv/bin/activate"
+  echo "  pip install -e ."
+  echo
+  echo "Then rerun:"
+  echo "  scripts/install_deps.sh"
   exit 1
 fi
 
-brew install yt-dlp
+python3 -m pip install --upgrade pip
+python3 -m pip install yt-dlp
 
 echo
 echo "Next:"
-echo "1) Install the Python package in editable mode:"
-echo "   python3 -m venv .venv && source .venv/bin/activate && pip install -e ."
+echo "yt-dlp installed (optional YouTube fallback + richer metadata)."

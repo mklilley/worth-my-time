@@ -15,7 +15,7 @@ Local-first “content triage” pipeline: save links into a Brave bookmarks fol
 ## Repo layout
 
 - `config.yaml` sample config (copy to `~/.config/wmt/config.yaml`)
-- `prompts/triage_prompt.md` reference prompt template (the code uses an embedded copy)
+- `src/wmt/prompts/triage_prompt.md` triage prompt template (used by the code)
 - `src/wmt/` implementation
 - `tests/` minimal unit tests
 
@@ -32,7 +32,8 @@ You also need the `codex` CLI installed and logged in (this tool shells out to i
 YouTube transcripts are fetched automatically via `youtube-transcript-api` (installed as a dependency).
 
 Optional:
-- `brew install yt-dlp` (fallback subtitle retrieval when the API fails)
+- `pip install yt-dlp` (fallback subtitle retrieval + richer YouTube metadata like duration/upload date)
+  - or run `scripts/install_deps.sh` after activating your `.venv`
 
 ## Configure
 
@@ -46,6 +47,8 @@ Edit `~/.config/wmt/config.yaml`:
 - `paths.output_dir` → Syncthing folder where `.md` files should land
 - `bookmarks.inbox_folder_name` → must be `Inbox` (case-sensitive)
 - `codex.web_search_enabled: true` → enables “reception pulse” lookups
+- Optional prompt override:
+  - `paths.triage_prompt_file` → path to a custom triage prompt template file
 - Optional publishing:
   - `hackmd.enabled: true` + `hackmd.api_token` + `hackmd.parent_folder_id` → also create a HackMD note after saving locally
 
@@ -87,6 +90,21 @@ Show ledger counts:
 
 ```bash
 wmt status
+```
+
+## launchd (set-and-forget)
+
+Install:
+
+```bash
+chmod +x scripts/*.sh
+scripts/install_launchd.sh
+```
+
+Uninstall:
+
+```bash
+scripts/uninstall_launchd.sh
 ```
 
 ## Notes / guarantees

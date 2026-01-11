@@ -13,6 +13,7 @@ from wmt.state import StateStore
 from wmt.triage_output import atomic_write_text, triage_output_filename
 from wmt.triage_prompt import build_triage_prompt
 from wmt.urls import is_probably_http_url, normalize_url
+from wmt.youtube_metadata import YouTubeMetadata, get_youtube_metadata
 from wmt.youtube_transcripts import get_youtube_transcript, is_youtube_url
 
 log = logging.getLogger(__name__)
@@ -42,14 +43,36 @@ def _truncate(text: str, *, max_chars: int) -> tuple[str, bool]:
     return text[:max_chars].rstrip() + "\n\n[TRUNCATED]\n", True
 
 
+def _format_youtube_metadata(meta: YouTubeMetadata | None) -> str:
+    if meta is None:
+        return ""
+    lines: list[str] = ["METADATA (script-provided; best-effort):"]
+    if meta.title:
+        lines.append(f"- Title: {meta.title}")
+    if meta.channel:
+        if meta.channel_url:
+            lines.append(f"- Channel: {meta.channel} ({meta.channel_url})")
+        else:
+            lines.append(f"- Channel: {meta.channel}")
+    if meta.upload_date:
+        lines.append(f"- Upload date: {meta.upload_date}")
+    if meta.duration_seconds is not None:
+        lines.append(f"- Duration seconds: {meta.duration_seconds}")
+    lines.append(f"- Retrieved via: {meta.source}")
+    if meta.notes:
+        lines.append("- Notes:")
+        lines.extend([f"  - {n}" for n in meta.notes])
+    return "\n".join(lines).strip()
+
+
 def _build_transcript_payload(
     cfg: AppConfig,
     *,
     url: str,
     title_hint: str | None,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, str]:
     """
-    Returns (transcript_payload, extracted_title).
+    Returns (transcript_payload, extracted_title, metadata_payload).
 
     For v1 we only provide a transcript when we can reliably retrieve one (YouTube),
     or when a user supplies it directly via `process-url --transcript-stdin`.
@@ -60,6 +83,10 @@ def _build_transcript_payload(
     normalized = normalize_url(url)
 
     if is_youtube_url(normalized):
+        meta = get_youtube_metadata(normalized, timeout_seconds=cfg.fetch.timeout_seconds)
+        extracted_title = meta.title if meta and meta.title else title_hint
+        metadata_payload = _format_youtube_metadata(meta)
+
         yt = get_youtube_transcript(normalized)
         if yt and yt.text.strip():
             log.info(
@@ -80,10 +107,11 @@ def _build_transcript_payload(
                 header.extend([f"  - {n}" for n in yt.notes])
             payload = "\n".join(header).strip() + "\n\n" + yt.text.strip()
             payload, _trunc = _truncate(payload, max_chars=cfg.fetch.max_transcript_chars)
-            return payload, title_hint
+            return payload, extracted_title, metadata_payload
         log.info("No YouTube transcript available; leaving transcript empty: %s", normalized)
+        return "", extracted_title, metadata_payload
 
-    return "", title_hint
+    return "", title_hint, ""
 
 
 def _should_skip_due_to_state(state: StateStore, item_id: str, *, force: bool) -> bool:
@@ -129,7 +157,7 @@ def process_bookmark_item(
     )
 
     added_at = _local_dt(bookmark.date_added)
-    transcript_payload, extracted_title = _build_transcript_payload(
+    transcript_payload, extracted_title, metadata_payload = _build_transcript_payload(
         cfg,
         url=normalized_url,
         title_hint=bookmark.title,
@@ -147,7 +175,9 @@ def process_bookmark_item(
     stdin_prompt = build_triage_prompt(
         link=normalized_url,
         transcript=transcript_payload,
+        metadata=metadata_payload,
         output_file=str(output_file),
+        prompt_file=cfg.paths.triage_prompt_file,
     )
 
     try:
@@ -291,9 +321,17 @@ def process_url(
     if transcript is not None and transcript.strip():
         payload = "TRANSCRIPT PROVIDED BY USER:\n\n" + transcript.strip()
         payload, _trunc = _truncate(payload, max_chars=cfg.fetch.max_transcript_chars)
-        extracted_title = title
+        meta = (
+            get_youtube_metadata(normalized_url, timeout_seconds=cfg.fetch.timeout_seconds)
+            if is_youtube_url(normalized_url)
+            else None
+        )
+        extracted_title = title or (meta.title if meta and meta.title else None)
+        metadata_payload = _format_youtube_metadata(meta)
     else:
-        payload, extracted_title = _build_transcript_payload(cfg, url=normalized_url, title_hint=title)
+        payload, extracted_title, metadata_payload = _build_transcript_payload(
+            cfg, url=normalized_url, title_hint=title
+        )
         if is_youtube_url(normalized_url) and not payload.strip():
             err = "No YouTube transcript available (skipping)"
             log.warning("%s: %s", err, normalized_url)
@@ -309,7 +347,9 @@ def process_url(
     stdin_prompt = build_triage_prompt(
         link=normalized_url,
         transcript=payload,
+        metadata=metadata_payload,
         output_file=str(output_file),
+        prompt_file=cfg.paths.triage_prompt_file,
     )
 
     try:

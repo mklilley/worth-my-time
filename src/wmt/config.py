@@ -49,11 +49,21 @@ def _expand_path(value: str | None) -> Path | None:
     return Path(os.path.expandvars(value)).expanduser()
 
 
+def _optional_path(value: Any) -> Path | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    return _expand_path(s)
+
+
 @dataclass(frozen=True)
 class PathsConfig:
     bookmarks_file: Path
     output_dir: Path
     log_file: Path
+    triage_prompt_file: Path | None
 
 
 @dataclass(frozen=True)
@@ -119,6 +129,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "bookmarks_file": "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Bookmarks",
         "output_dir": "~/Syncthing/WorthMyTime",
         "log_file": "~/Library/Logs/worth_my_time.log",
+        "triage_prompt_file": "",
     },
     "bookmarks": {"root_name": "bookmark_bar", "inbox_folder_name": "Inbox"},
     "state": {"backend": "json", "path": "~/.config/wmt/state.json"},
@@ -177,6 +188,10 @@ def load_config(path: Path | None = None) -> AppConfig:
     codex = merged.get("codex", {})
     hackmd = merged.get("hackmd", {})
 
+    triage_prompt_file = _optional_path(paths.get("triage_prompt_file"))
+    if triage_prompt_file is not None and not triage_prompt_file.exists():
+        raise ConfigError(f"paths.triage_prompt_file does not exist: {triage_prompt_file}")
+
     hackmd_enabled = bool(hackmd.get("enabled", False))
     api_base_url = str(hackmd.get("api_base_url", "https://api.hackmd.io/v1")).strip().rstrip("/")
     api_token = str(hackmd.get("api_token", "")).strip()
@@ -197,6 +212,7 @@ def load_config(path: Path | None = None) -> AppConfig:
             bookmarks_file=_expand_path(str(paths.get("bookmarks_file"))) or Path(),
             output_dir=_expand_path(str(paths.get("output_dir"))) or Path(),
             log_file=_expand_path(str(paths.get("log_file"))) or Path(),
+            triage_prompt_file=triage_prompt_file,
         ),
         bookmarks=BookmarksConfig(
             root_name=str(bookmarks.get("root_name", "bookmark_bar")),

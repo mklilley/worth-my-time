@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -179,20 +180,36 @@ def _pick_sub_file(files: list[Path]) -> Path | None:
     return files[0]
 
 
+def _yt_dlp_base_cmd() -> list[str] | None:
+    """
+    Prefer `python -m yt_dlp` so a pip-installed package works without Homebrew/system installs.
+    Fall back to `yt-dlp` if available.
+    """
+    candidates: list[list[str]] = [
+        [sys.executable, "-m", "yt_dlp"],
+        ["yt-dlp"],
+    ]
+    for base in candidates:
+        try:
+            subprocess.run(base + ["--version"], capture_output=True, text=True, check=True)
+            return base
+        except Exception:
+            continue
+    return None
+
+
 def _try_yt_dlp(url: str) -> YouTubeTranscript | None:
     """
     Uses `yt-dlp` if installed to fetch subtitles (manual or auto) and convert to text.
     """
-    try:
-        subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, check=True)
-    except Exception:
+    base = _yt_dlp_base_cmd()
+    if not base:
         return None
 
     with tempfile.TemporaryDirectory(prefix="wmt_yt_") as td:
         tmp = Path(td)
         out_tmpl = str(tmp / "%(id)s.%(ext)s")
-        cmd = [
-            "yt-dlp",
+        cmd = base + [
             "--skip-download",
             "--no-warnings",
             "--write-subs",

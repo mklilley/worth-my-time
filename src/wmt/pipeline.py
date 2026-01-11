@@ -130,7 +130,8 @@ def process_bookmark_item(
     item_id = bookmark.identity_sha256(normalized_url=normalized_url)
 
     if _should_skip_due_to_state(state, item_id, force=force):
-        log.info("Already processed (bookmark id): %s", normalized_url)
+        # This can be very noisy in watch-mode; use -v/DEBUG if you want to see it.
+        log.debug("Already processed (bookmark id): %s", normalized_url)
         return None
 
     if not state.allow_retry_in_progress(item_id, cfg.processing.in_progress_ttl_seconds) and not force:

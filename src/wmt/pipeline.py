@@ -158,7 +158,9 @@ def process_bookmark_item(
         log.warning("%s: %s", err, normalized_url)
         state.mark_failed(item_id, err)
         return None
-    title_for_filename = bookmark.title or extracted_title or "Untitled"
+    # Prefer extracted metadata title (e.g. YouTube oEmbed) over the bookmark's saved label,
+    # which often includes noise like " - YouTube" or user-added numbering.
+    title_for_filename = extracted_title or bookmark.title or "Untitled"
     output_file = triage_output_path(cfg.paths.output_dir.expanduser(), title=title_for_filename)
     log.info("Writing analysis to: %s", output_file)
 

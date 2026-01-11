@@ -7,10 +7,7 @@
 
     <key>ProgramArguments</key>
     <array>
-      <string>/usr/bin/env</string>
-      <string>python3</string>
-      <string>-m</string>
-      <string>wmt</string>
+      <string>__WMT_BIN__</string>
       <string>watch</string>
       <string>--config</string>
       <string>__CONFIG_PATH__</string>

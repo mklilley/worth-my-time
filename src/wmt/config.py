@@ -94,6 +94,15 @@ class CodexConfig:
 
 
 @dataclass(frozen=True)
+class HackMDConfig:
+    enabled: bool
+    api_base_url: str
+    api_token: str
+    parent_folder_id: str
+    timeout_seconds: int
+
+
+@dataclass(frozen=True)
 class AppConfig:
     paths: PathsConfig
     bookmarks: BookmarksConfig
@@ -101,6 +110,7 @@ class AppConfig:
     processing: ProcessingConfig
     fetch: FetchConfig
     codex: CodexConfig
+    hackmd: HackMDConfig
     config_path: Path
 
 
@@ -131,6 +141,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "web_search_enabled": True,
         "timeout_seconds": 900,
     },
+    "hackmd": {
+        "enabled": False,
+        "api_base_url": "https://api.hackmd.io/v1",
+        "api_token": "",
+        "api_token_env": "",
+        "parent_folder_id": "",
+        "timeout_seconds": 20,
+    },
 }
 
 
@@ -157,6 +175,22 @@ def load_config(path: Path | None = None) -> AppConfig:
     processing = merged.get("processing", {})
     fetch = merged.get("fetch", {})
     codex = merged.get("codex", {})
+    hackmd = merged.get("hackmd", {})
+
+    hackmd_enabled = bool(hackmd.get("enabled", False))
+    api_base_url = str(hackmd.get("api_base_url", "https://api.hackmd.io/v1")).strip().rstrip("/")
+    api_token = str(hackmd.get("api_token", "")).strip()
+    api_token_env = str(hackmd.get("api_token_env", "")).strip()
+    if not api_token and api_token_env:
+        api_token = str(os.environ.get(api_token_env, "")).strip()
+    parent_folder_id = str(hackmd.get("parent_folder_id", "")).strip()
+    hackmd_timeout = int(hackmd.get("timeout_seconds", 20))
+
+    if hackmd_enabled:
+        if not api_token:
+            raise ConfigError("hackmd.enabled is true but hackmd.api_token is empty")
+        if not parent_folder_id:
+            raise ConfigError("hackmd.enabled is true but hackmd.parent_folder_id is empty")
 
     return AppConfig(
         paths=PathsConfig(
@@ -190,6 +224,13 @@ def load_config(path: Path | None = None) -> AppConfig:
             model_reasoning_effort=str(codex.get("model_reasoning_effort", "")).strip(),
             web_search_enabled=bool(codex.get("web_search_enabled", True)),
             timeout_seconds=int(codex.get("timeout_seconds", 900)),
+        ),
+        hackmd=HackMDConfig(
+            enabled=hackmd_enabled,
+            api_base_url=api_base_url,
+            api_token=api_token,
+            parent_folder_id=parent_folder_id,
+            timeout_seconds=hackmd_timeout,
         ),
         config_path=config_path.resolve(),
     )

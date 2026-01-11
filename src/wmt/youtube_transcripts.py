@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import subprocess
 import tempfile
@@ -102,31 +103,33 @@ def _try_youtube_transcript_api(video_id: str) -> YouTubeTranscript | None:
     # Best-effort: prefer English variants, fall back to whatever's available.
     preferred_langs = ["en", "en-US", "en-GB"]
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # youtube-transcript-api v1+ uses an instance API with `fetch()` returning a FetchedTranscript.
+        # Older versions used classmethods like `get_transcript` / `list_transcripts`.
+        if hasattr(YouTubeTranscriptApi, "__call__") or isinstance(YouTubeTranscriptApi, type):
+            api = YouTubeTranscriptApi()  # type: ignore[call-arg]
+        else:
+            api = YouTubeTranscriptApi  # type: ignore[assignment]
 
-        chosen = None
-        for picker in (
-            "find_manually_created_transcript",
-            "find_generated_transcript",
-            "find_transcript",
-        ):
-            fn = getattr(transcript_list, picker, None)
-            if not callable(fn):
-                continue
+        # v1+: api.fetch(video_id, languages=[...]) -> iterable of snippets with .text/.start
+        if hasattr(api, "fetch"):
+            fetched = api.fetch(video_id, languages=preferred_langs)  # type: ignore[attr-defined]
+            segments = []
+            for snippet in fetched:
+                segments.append({"text": getattr(snippet, "text", ""), "start": getattr(snippet, "start", 0.0)})
+            language = getattr(fetched, "language_code", None) or getattr(fetched, "language", None)
+            is_auto = bool(getattr(fetched, "is_generated", False))
+        # Older: classmethod get_transcript(video_id, languages=...) -> list[dict]
+        elif hasattr(YouTubeTranscriptApi, "get_transcript"):
             try:
-                chosen = fn(preferred_langs)
-                if chosen is not None:
-                    break
+                segments = YouTubeTranscriptApi.get_transcript(video_id, languages=preferred_langs)  # type: ignore[attr-defined]
             except Exception:
-                continue
-
-        if chosen is None:
-            try:
-                chosen = next(iter(transcript_list))
-            except Exception:
-                return None
-
-        segments: list[dict[str, Any]] = chosen.fetch()
+                segments = YouTubeTranscriptApi.get_transcript(video_id)  # type: ignore[attr-defined]
+            language = None
+            is_auto = None
+        else:
+            raise YouTubeTranscriptError(
+                "youtube-transcript-api API mismatch (expected .fetch() or .get_transcript())"
+            )
 
         lines: list[str] = []
         for seg in segments:
@@ -144,11 +147,21 @@ def _try_youtube_transcript_api(video_id: str) -> YouTubeTranscript | None:
         return YouTubeTranscript(
             text=text,
             source="youtube-transcript-api",
-            language=getattr(chosen, "language_code", None),
-            is_auto=bool(getattr(chosen, "is_generated", False)),
+            language=language,
+            is_auto=is_auto,
         )
     except Exception as e:
-        log.info("youtube-transcript-api failed for %s: %s", video_id, e)
+        try:
+            ver = importlib.metadata.version("youtube-transcript-api")
+        except Exception:
+            ver = "unknown"
+        log.warning(
+            "youtube-transcript-api failed for %s (v=%s, %s): %s",
+            video_id,
+            ver,
+            type(e).__name__,
+            e,
+        )
         return None
 
 

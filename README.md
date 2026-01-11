@@ -46,6 +46,8 @@ Edit `~/.config/wmt/config.yaml`:
 - `paths.output_dir` → Syncthing folder where `.md` files should land
 - `bookmarks.inbox_folder_name` → must be `Inbox` (case-sensitive)
 - `codex.web_search_enabled: true` → enables “reception pulse” lookups
+- Optional publishing:
+  - `hackmd.enabled: true` + `hackmd.api_token` + `hackmd.parent_folder_id` → also create a HackMD note after saving locally
 
 ### Finding the Brave bookmarks file (macOS)
 
@@ -93,3 +95,14 @@ wmt status
 - **Paywalls:** the output should clearly say what was/wasn’t accessible.
 - **Crash safety:** items are marked `in_progress` first (with TTL) and won’t double-process across runners.
 - **One file per bookmark:** the tool writes a fresh file once per processed item (no append-only notebooks).
+
+## Optional: HackMD publishing
+
+If enabled, `wmt` will `POST` your generated Markdown to the HackMD API (user notes) after writing the local file.
+
+Config:
+- `hackmd.enabled: true`
+- `hackmd.api_token: ...` (or `hackmd.api_token_env: ENV_VAR_NAME`)
+- `hackmd.parent_folder_id: ...`
+
+Implementation lives in `src/wmt/publish.py:1` and `src/wmt/publishers/hackmd.py:1`.

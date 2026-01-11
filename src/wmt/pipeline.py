@@ -8,6 +8,7 @@ from pathlib import Path
 from wmt.bookmarks import BookmarkItem, BookmarksError, load_brave_inbox_bookmarks
 from wmt.codex_runner import CodexError, run_codex
 from wmt.config import AppConfig
+from wmt.publish import publish_all
 from wmt.state import StateStore
 from wmt.triage_output import atomic_write_text, triage_output_filename
 from wmt.triage_prompt import build_triage_prompt
@@ -133,6 +134,11 @@ def process_bookmark_item(
         url=normalized_url,
         title_hint=bookmark.title,
     )
+    if is_youtube_url(normalized_url) and not transcript_payload.strip():
+        err = "No YouTube transcript available (skipping)"
+        log.warning("%s: %s", err, normalized_url)
+        state.mark_failed(item_id, err)
+        return None
     title_for_filename = bookmark.title or extracted_title or "Untitled"
     filename = triage_output_filename(title=title_for_filename, added_at=added_at, short_id=item_id)
     output_file = (cfg.paths.output_dir / filename).expanduser()
@@ -172,6 +178,11 @@ def process_bookmark_item(
             )
 
     atomic_write_text(output_file, markdown)
+    for res in publish_all(cfg, markdown=markdown):
+        if not res.ok:
+            log.warning("Publish failed (%s): %s", res.publisher, res.error)
+        else:
+            log.info("Published (%s): %s", res.publisher, res.url or res.note_id or "ok")
     state.mark_processed(
         item_id,
         archive_path=None,
@@ -283,6 +294,11 @@ def process_url(
         extracted_title = title
     else:
         payload, extracted_title = _build_transcript_payload(cfg, url=normalized_url, title_hint=title)
+        if is_youtube_url(normalized_url) and not payload.strip():
+            err = "No YouTube transcript available (skipping)"
+            log.warning("%s: %s", err, normalized_url)
+            state.mark_failed(item_id, err)
+            return None
 
     title_for_filename = title or extracted_title or "Untitled"
     filename = triage_output_filename(title=title_for_filename, added_at=datetime.now(), short_id=item_id)
@@ -324,6 +340,11 @@ def process_url(
             )
 
     atomic_write_text(output_file, markdown)
+    for res in publish_all(cfg, markdown=markdown):
+        if not res.ok:
+            log.warning("Publish failed (%s): %s", res.publisher, res.error)
+        else:
+            log.info("Published (%s): %s", res.publisher, res.url or res.note_id or "ok")
     state.mark_processed(
         item_id,
         archive_path=None,

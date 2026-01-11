@@ -57,3 +57,19 @@ codex:
   # Enable Codex web search so it can find “reception pulse” links.
   web_search_enabled: true
   timeout_seconds: 900
+
+hackmd:
+  # Optional: publish each processed markdown file to HackMD after saving locally.
+  enabled: false
+
+  # Create an API token in HackMD settings, then set it here.
+  # (Prefer env var if you don't want secrets on disk: set api_token_env instead.)
+  api_token: ""
+  api_token_env: ""
+
+  # Where to create the note (folder UUID in HackMD).
+  parent_folder_id: ""
+
+  # HackMD API base URL and request timeout.
+  api_base_url: https://api.hackmd.io/v1
+  timeout_seconds: 60

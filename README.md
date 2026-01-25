@@ -68,6 +68,12 @@ Process one bookmark from Inbox:
 wmt process-one --config ~/.config/wmt/config.yaml
 ```
 
+Force reprocess (even if already processed/failed):
+
+```bash
+wmt process-one --force --config ~/.config/wmt/config.yaml
+```
+
 Watch forever (polling; processes at most one per loop):
 
 ```bash
@@ -78,6 +84,12 @@ Process a URL directly (YouTube transcripts are fetched automatically when avail
 
 ```bash
 wmt process-url "https://www.youtube.com/watch?v=VIDEO"
+```
+
+Force reprocess (even if already processed/failed):
+
+```bash
+wmt process-url --force "https://www.youtube.com/watch?v=VIDEO"
 ```
 
 Process a URL with a transcript you already have (podcasts, paywalled content, etc.):

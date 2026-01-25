@@ -150,7 +150,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "model": "",
         "model_reasoning_effort": "",
         "web_search_enabled": True,
-        "timeout_seconds": 900,
+        "timeout_seconds": 1800,
     },
     "hackmd": {
         "enabled": False,
@@ -239,7 +239,7 @@ def load_config(path: Path | None = None) -> AppConfig:
             model=str(codex.get("model", "")).strip(),
             model_reasoning_effort=str(codex.get("model_reasoning_effort", "")).strip(),
             web_search_enabled=bool(codex.get("web_search_enabled", True)),
-            timeout_seconds=int(codex.get("timeout_seconds", 900)),
+            timeout_seconds=int(codex.get("timeout_seconds", 1800)),
         ),
         hackmd=HackMDConfig(
             enabled=hackmd_enabled,

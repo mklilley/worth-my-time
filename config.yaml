@@ -59,7 +59,8 @@ codex:
   model_reasoning_effort: ""
   # Enable Codex web search so it can find “reception pulse” links.
   web_search_enabled: true
-  timeout_seconds: 900
+  # Some long pages / deep research can take a while.
+  timeout_seconds: 1800
 
 hackmd:
   # Optional: publish each processed markdown file to HackMD after saving locally.

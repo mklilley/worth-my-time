@@ -16,6 +16,26 @@ class CodexError(RuntimeError):
     pass
 
 
+class CodexDisabledError(CodexError):
+    pass
+
+
+class CodexNotFoundError(CodexError):
+    pass
+
+
+class CodexTimeoutError(CodexError):
+    pass
+
+
+class CodexFailedError(CodexError):
+    pass
+
+
+class CodexEmptyOutputError(CodexError):
+    pass
+
+
 @dataclass(frozen=True)
 class CodexResult:
     markdown: str
@@ -87,7 +107,7 @@ def _inject_web_search(cmd: list[str], enabled: bool) -> list[str]:
 
 def run_codex(cfg: CodexConfig, *, stdin_prompt: str) -> CodexResult:
     if not cfg.enabled:
-        raise CodexError("Codex is disabled in config")
+        raise CodexDisabledError("Codex is disabled in config")
     if not cfg.command:
         raise CodexError("codex.command is empty")
 
@@ -114,7 +134,7 @@ def run_codex(cfg: CodexConfig, *, stdin_prompt: str) -> CodexResult:
                 check=True,
             )
         except FileNotFoundError as e:
-            raise CodexError(f"Codex command not found: {cmd[0]}") from e
+            raise CodexNotFoundError(f"Codex command not found: {cmd[0]}") from e
         except subprocess.TimeoutExpired as e:
             if out_path.exists():
                 text = out_path.read_text(encoding="utf-8").strip()
@@ -124,7 +144,7 @@ def run_codex(cfg: CodexConfig, *, stdin_prompt: str) -> CodexResult:
                         cfg.timeout_seconds,
                     )
                     return CodexResult(markdown=text)
-            raise CodexError(
+            raise CodexTimeoutError(
                 f"Codex timed out after {cfg.timeout_seconds}s "
                 f"(increase codex.timeout_seconds in config.yaml)"
             ) from e
@@ -132,12 +152,12 @@ def run_codex(cfg: CodexConfig, *, stdin_prompt: str) -> CodexResult:
             stderr = (e.stderr or "").strip()
             stdout = (e.stdout or "").strip()
             detail = stderr or stdout or f"exit {e.returncode}"
-            raise CodexError(f"Codex failed: {detail}") from e
+            raise CodexFailedError(f"Codex failed: {detail}") from e
 
         if out_path.exists():
             text = out_path.read_text(encoding="utf-8").strip()
         else:
             text = ""
         if not text:
-            raise CodexError("Codex produced no output (empty last message)")
+            raise CodexEmptyOutputError("Codex produced no output (empty last message)")
         return CodexResult(markdown=text)

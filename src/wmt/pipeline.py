@@ -6,7 +6,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from wmt.bookmarks import BookmarkItem, BookmarksError, load_brave_inbox_bookmarks
-from wmt.codex_runner import CodexError, run_codex
+from wmt.codex_runner import (
+    CodexDisabledError,
+    CodexEmptyOutputError,
+    CodexError,
+    CodexFailedError,
+    CodexNotFoundError,
+    CodexTimeoutError,
+    run_codex,
+)
 from wmt.config import AppConfig
 from wmt.publish import publish_all
 from wmt.state import StateStore
@@ -25,6 +33,66 @@ class ProcessOutcome:
     url: str
     output_file: Path
     codex_status: str
+
+
+def _codex_failure_details(e: CodexError) -> tuple[str, str, str]:
+    """
+    Returns: (codex_status, display_label, tip)
+    """
+    if isinstance(e, CodexTimeoutError):
+        return (
+            "timeout",
+            "Codex timed out",
+            "Tip: increase `codex.timeout_seconds` in config.yaml, then re-run with `--force`.",
+        )
+    if isinstance(e, CodexNotFoundError):
+        return (
+            "not_found",
+            "Codex not found",
+            "Tip: ensure the `codex` CLI is installed and on PATH (launchd may need PATH set).",
+        )
+    if isinstance(e, CodexDisabledError):
+        return (
+            "disabled",
+            "Codex disabled",
+            "Tip: set `codex.enabled: true` in config.yaml to enable analysis.",
+        )
+    if isinstance(e, CodexEmptyOutputError):
+        return ("empty_output", "Codex produced no output", "Tip: try re-running with `--force`.")
+    if isinstance(e, CodexFailedError):
+        return ("failed", "Codex failed", "Tip: check `paths.log_file` for details, then re-run.")
+    return ("error", "Codex error", "Tip: check `paths.log_file` for details, then re-run.")
+
+
+def _fallback_markdown(
+    *,
+    title: str,
+    url: str,
+    basis: str,
+    transcript_payload: str,
+    codex_label: str,
+    tip: str,
+    error: CodexError,
+) -> str:
+    markdown = (
+        f"# {title}\n"
+        f"Source: <{url}>\n"
+        f"Input basis: {basis} ({codex_label})\n\n"
+        f"## So… is it worth it?\n"
+        f"**Recommendation:** Maybe\n"
+        f"**Why (2–4 bullets):**\n"
+        f"- {codex_label}, so this file contains only the link (and transcript if provided).\n"
+        f"- {tip}\n"
+        f"- Error: {error}\n\n"
+    )
+    if transcript_payload.strip():
+        markdown += (
+            "\n<details>\n"
+            "<summary>Deeper: provided transcript</summary>\n\n"
+            f"```\n{transcript_payload}\n```\n"
+            "</details>\n"
+        )
+    return markdown
 
 
 def _truncate(text: str, *, max_chars: int) -> tuple[str, bool]:
@@ -174,31 +242,21 @@ def process_bookmark_item(
     )
 
     try:
-        if not cfg.codex.enabled:
-            raise CodexError("Codex is disabled in config")
         result = run_codex(cfg.codex, stdin_prompt=stdin_prompt)
         markdown = result.markdown.strip()
         codex_status = "ok"
     except CodexError as e:
-        codex_status = "unavailable"
+        codex_status, codex_label, tip = _codex_failure_details(e)
         basis = "Transcript provided" if transcript_payload.strip() else "Link only"
-        markdown = (
-            f"# {title_for_filename}\n"
-            f"Source: {normalized_url}\n"
-            f"Input basis: {basis} (Codex unavailable)\n\n"
-            f"## So… is it worth it?\n"
-            f"**Recommendation:** Maybe\n"
-            f"**Why (2–4 bullets):**\n"
-            f"- Codex was unavailable, so this file contains only the link (and transcript if provided).\n"
-            f"- Error: {e}\n\n"
+        markdown = _fallback_markdown(
+            title=title_for_filename,
+            url=normalized_url,
+            basis=basis,
+            transcript_payload=transcript_payload,
+            codex_label=codex_label,
+            tip=tip,
+            error=e,
         )
-        if transcript_payload.strip():
-            markdown += (
-                "\n<details>\n"
-                "<summary>Deeper: provided transcript</summary>\n\n"
-                f"```\n{transcript_payload}\n```\n"
-                "</details>\n"
-            )
 
     atomic_write_text(output_file, markdown)
     for res in publish_all(cfg, markdown=markdown):
@@ -345,31 +403,21 @@ def process_url(
     )
 
     try:
-        if not cfg.codex.enabled:
-            raise CodexError("Codex is disabled in config")
         result = run_codex(cfg.codex, stdin_prompt=stdin_prompt)
         markdown = result.markdown.strip()
         codex_status = "ok"
     except CodexError as e:
-        codex_status = "unavailable"
+        codex_status, codex_label, tip = _codex_failure_details(e)
         basis = "Transcript provided" if payload.strip() else "Link only"
-        markdown = (
-            f"# {title_for_filename}\n"
-            f"Source: {normalized_url}\n"
-            f"Input basis: {basis} (Codex unavailable)\n\n"
-            f"## So… is it worth it?\n"
-            f"**Recommendation:** Maybe\n"
-            f"**Why (2–4 bullets):**\n"
-            f"- Codex was unavailable, so this file contains only the link (and transcript if provided).\n"
-            f"- Error: {e}\n\n"
+        markdown = _fallback_markdown(
+            title=title_for_filename,
+            url=normalized_url,
+            basis=basis,
+            transcript_payload=payload,
+            codex_label=codex_label,
+            tip=tip,
+            error=e,
         )
-        if payload.strip():
-            markdown += (
-                "\n<details>\n"
-                "<summary>Deeper: provided transcript</summary>\n\n"
-                f"```\n{payload}\n```\n"
-                "</details>\n"
-            )
 
     atomic_write_text(output_file, markdown)
     for res in publish_all(cfg, markdown=markdown):

@@ -27,7 +27,7 @@ NON-NEGOTIABLES
   (1) what the source explicitly says,
   (2) what you infer,
   (3) what you recommend.
-- Include direct links for anything you reference (original + any reactions/coverage).
+- Include direct links for anything you reference (original + any reactions/coverage). Don’t wrap URLs in backticks — use Markdown links or plain/autolink URLs.
 - Be sceptical and precise, not snarky.
 
 WHAT TO DO
@@ -71,8 +71,11 @@ WHAT TO DO
 
 MARKDOWN STRUCTURE (use this exact skeleton)
 
+- Formatting rules for the header block:
+  - `Source:` must be a single Markdown autolink like `Source: <https://example.com>` (no backticks, and no extra citations/links on that line).
+
 # {Title}
-Source: <{LINK}> (or "N/A" if no link)
+Source: <{LINK}>
 Input basis: {Transcript provided / Link only} (and note any access limits)
 By: {Author/Org if known} • Date: {if known} • Format: {if known} • Length: {if known}
 

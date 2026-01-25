@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from wmt.bookmarks import BookmarkItem, BookmarksError, load_brave_inbox_bookmarks
 from wmt.codex_runner import (
@@ -93,6 +95,71 @@ def _fallback_markdown(
             "</details>\n"
         )
     return markdown
+
+
+_H1_RE = re.compile(r"^\s*#\s+(.+?)\s*$")
+_TRAILING_EXT_RE = re.compile(r"\.[a-z0-9]{1,6}$", re.IGNORECASE)
+
+
+def _title_hint_from_url(url: str) -> str | None:
+    """
+    Best-effort: derive a human-ish title hint from the URL path, for filenames.
+
+    This is only used when we have no better title hint (bookmark label, YouTube oEmbed, etc.).
+    """
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return None
+
+    path = (parts.path or "").strip("/")
+    if path:
+        last = path.split("/")[-1]
+        last = unquote(last)
+        last = _TRAILING_EXT_RE.sub("", last)
+        last = last.replace("_", " ").replace("-", " ").strip()
+        if last and last.lower() not in {"index", "home"}:
+            return last
+
+    host = (parts.hostname or "").strip().lower()
+    if host:
+        return host
+    return None
+
+
+def _extract_h1_title(markdown: str) -> str | None:
+    """
+    Best-effort: extract the first H1 (`# Title`) from the markdown.
+    """
+    lines = markdown.splitlines()
+    if not lines:
+        return None
+
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+
+    # Skip optional YAML front matter.
+    if i < len(lines) and lines[i].strip() == "---":
+        i += 1
+        while i < len(lines) and lines[i].strip() != "---":
+            i += 1
+        if i < len(lines) and lines[i].strip() == "---":
+            i += 1
+
+    while i < len(lines):
+        line = lines[i].strip()
+        if not line:
+            i += 1
+            continue
+        m = _H1_RE.match(line)
+        if not m:
+            return None
+        title = m.group(1).strip()
+        if not title or title.lower() in {"untitled", "{title}"}:
+            return None
+        return title
+    return None
 
 
 def _truncate(text: str, *, max_chars: int) -> tuple[str, bool]:
@@ -389,16 +456,15 @@ def process_url(
             state.mark_failed(item_id, err)
             return None
 
-    title_for_filename = title or extracted_title or "Untitled"
-    output_file = triage_output_path(cfg.paths.output_dir.expanduser(), title=title_for_filename)
+    title_hint = title or extracted_title or _title_hint_from_url(normalized_url) or "Untitled"
+    planned_output_file = triage_output_path(cfg.paths.output_dir.expanduser(), title=title_hint)
     log.info("Processing URL: %s", normalized_url)
-    log.info("Writing analysis to: %s", output_file)
 
     stdin_prompt = build_triage_prompt(
         link=normalized_url,
         transcript=payload,
         metadata=metadata_payload,
-        output_file=str(output_file),
+        output_file=str(planned_output_file),
         prompt_file=cfg.paths.triage_prompt_file,
     )
 
@@ -410,7 +476,7 @@ def process_url(
         codex_status, codex_label, tip = _codex_failure_details(e)
         basis = "Transcript provided" if payload.strip() else "Link only"
         markdown = _fallback_markdown(
-            title=title_for_filename,
+            title=title_hint,
             url=normalized_url,
             basis=basis,
             transcript_payload=payload,
@@ -419,6 +485,16 @@ def process_url(
             error=e,
         )
 
+    output_file = planned_output_file
+    if codex_status == "ok" and not title and not extracted_title:
+        extracted_from_output = _extract_h1_title(markdown)
+        if extracted_from_output:
+            output_file = triage_output_path(
+                cfg.paths.output_dir.expanduser(),
+                title=extracted_from_output,
+            )
+
+    log.info("Writing analysis to: %s", output_file)
     atomic_write_text(output_file, markdown)
     for res in publish_all(cfg, markdown=markdown):
         if not res.ok:

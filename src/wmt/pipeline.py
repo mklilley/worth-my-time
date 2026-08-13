@@ -13,6 +13,7 @@ from wmt.codex_runner import (
     CodexEmptyOutputError,
     CodexError,
     CodexFailedError,
+    CodexModelUnsupportedError,
     CodexNotFoundError,
     CodexTimeoutError,
     run_codex,
@@ -61,6 +62,12 @@ def _codex_failure_details(e: CodexError) -> tuple[str, str, str]:
         )
     if isinstance(e, CodexEmptyOutputError):
         return ("empty_output", "Codex produced no output", "Tip: try re-running with `--force`.")
+    if isinstance(e, CodexModelUnsupportedError):
+        return (
+            "unsupported_model",
+            "Codex model unsupported",
+            "Tip: remove the `codex.model` override (set it to an empty string) so Codex uses the current model from `~/.codex/config.toml`, then re-run with `--force`.",
+        )
     if isinstance(e, CodexFailedError):
         return ("failed", "Codex failed", "Tip: check `paths.log_file` for details, then re-run.")
     return ("error", "Codex error", "Tip: check `paths.log_file` for details, then re-run.")
@@ -312,7 +319,9 @@ def process_bookmark_item(
         result = run_codex(cfg.codex, stdin_prompt=stdin_prompt)
         markdown = result.markdown.strip()
         codex_status = "ok"
+        codex_error: CodexError | None = None
     except CodexError as e:
+        codex_error = e
         codex_status, codex_label, tip = _codex_failure_details(e)
         basis = "Transcript provided" if transcript_payload.strip() else "Link only"
         markdown = _fallback_markdown(
@@ -326,6 +335,16 @@ def process_bookmark_item(
         )
 
     atomic_write_text(output_file, markdown)
+    if codex_error is not None:
+        log.warning("Not publishing because Codex analysis failed: %s", codex_error)
+        state.mark_failed(item_id, str(codex_error))
+        return ProcessOutcome(
+            item_id=item_id,
+            url=normalized_url,
+            output_file=output_file,
+            codex_status=codex_status,
+        )
+
     for res in publish_all(cfg, markdown=markdown):
         if not res.ok:
             log.warning("Publish failed (%s): %s", res.publisher, res.error)
@@ -472,7 +491,9 @@ def process_url(
         result = run_codex(cfg.codex, stdin_prompt=stdin_prompt)
         markdown = result.markdown.strip()
         codex_status = "ok"
+        codex_error: CodexError | None = None
     except CodexError as e:
+        codex_error = e
         codex_status, codex_label, tip = _codex_failure_details(e)
         basis = "Transcript provided" if payload.strip() else "Link only"
         markdown = _fallback_markdown(
@@ -496,6 +517,16 @@ def process_url(
 
     log.info("Writing analysis to: %s", output_file)
     atomic_write_text(output_file, markdown)
+    if codex_error is not None:
+        log.warning("Not publishing because Codex analysis failed: %s", codex_error)
+        state.mark_failed(item_id, str(codex_error))
+        return ProcessOutcome(
+            item_id=item_id,
+            url=normalized_url,
+            output_file=output_file,
+            codex_status=codex_status,
+        )
+
     for res in publish_all(cfg, markdown=markdown):
         if not res.ok:
             log.warning("Publish failed (%s): %s", res.publisher, res.error)

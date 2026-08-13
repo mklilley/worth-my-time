@@ -54,6 +54,7 @@ codex:
   # Command used to generate analysis. `-` means "read prompt from stdin".
   # Example: ["codex", "--color", "never", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "-"]
   command: ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "-"]
+  # Leave blank to inherit the current model from ~/.codex/config.toml. Pin only if needed.
   model: ""
   # Optional: pass through to Codex as `-c model_reasoning_effort="..."` (e.g. low|medium|high|xhigh).
   model_reasoning_effort: ""

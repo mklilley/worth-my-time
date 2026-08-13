@@ -47,6 +47,7 @@ Edit `~/.config/wmt/config.yaml`:
 - `paths.output_dir` → Syncthing folder where `.md` files should land
 - `bookmarks.inbox_folder_name` → must be `Inbox` (case-sensitive)
 - `codex.web_search_enabled: true` → enables “reception pulse” lookups
+- Keep `codex.model: ""` to inherit the current model from `~/.codex/config.toml`; this avoids stale model pins after Codex model migrations
 - Optional prompt override:
   - `paths.triage_prompt_file` → path to a custom triage prompt template file
 - Optional publishing:
@@ -125,6 +126,7 @@ scripts/uninstall_launchd.sh
 - **Paywalls:** the output should clearly say what was/wasn’t accessible.
 - **Crash safety:** items are marked `in_progress` first (with TTL) and won’t double-process across runners.
 - **One file per bookmark:** the tool writes a fresh file once per processed item (no append-only notebooks).
+- **Failed analyses stay local:** if Codex fails, `wmt` writes a local diagnostic note, marks the item failed, and does not publish that diagnostic to HackMD. Re-run with `--force` after fixing the cause.
 - **Filenames:** `wmt` writes `<slug>.md` and adds `-2`, `-3`, … if a file already exists.
 
 ## Optional: HackMD publishing

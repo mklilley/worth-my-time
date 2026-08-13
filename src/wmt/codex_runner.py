@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -10,6 +11,10 @@ from pathlib import Path
 from wmt.config import CodexConfig
 
 log = logging.getLogger(__name__)
+
+_UNSUPPORTED_MODEL_RE = re.compile(
+    r"The '([^']+)' model is not supported when using Codex with a ChatGPT account\."
+)
 
 
 class CodexError(RuntimeError):
@@ -29,6 +34,10 @@ class CodexTimeoutError(CodexError):
 
 
 class CodexFailedError(CodexError):
+    pass
+
+
+class CodexModelUnsupportedError(CodexFailedError):
     pass
 
 
@@ -152,6 +161,12 @@ def run_codex(cfg: CodexConfig, *, stdin_prompt: str) -> CodexResult:
             stderr = (e.stderr or "").strip()
             stdout = (e.stdout or "").strip()
             detail = stderr or stdout or f"exit {e.returncode}"
+            unsupported_model = _UNSUPPORTED_MODEL_RE.search(detail)
+            if unsupported_model:
+                model = unsupported_model.group(1)
+                raise CodexModelUnsupportedError(
+                    f"The configured model '{model}' is not supported by Codex with ChatGPT sign-in"
+                ) from e
             raise CodexFailedError(f"Codex failed: {detail}") from e
 
         if out_path.exists():
